@@ -1,0 +1,26 @@
+name: CI
+
+on: push
+
+jobs:
+  build_and_test_container:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Train model
+        run: python train.py
+      - name: Build Docker image
+        run: docker build -t mlops-assignment-3 .
+      - name: Run the container
+        run: docker run mlops-assignment-3 python predict.py
+      - name: Log in to DockerHub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Push image to DockerHub
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/mlops-assignment-3
