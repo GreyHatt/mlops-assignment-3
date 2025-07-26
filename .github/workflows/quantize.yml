@@ -1,0 +1,27 @@
+name: Quantize Pipeline
+
+on: push
+
+jobs:
+  quantize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Ensure train.py exists (fetch from dev if missing)
+        run: |
+          if [ ! -f train.py ]; then
+            git fetch origin
+            git checkout origin/dev -- train.py
+            git checkout origin/docker_ci -- requirements.txt
+          fi
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Train model
+        run: python train.py
+      - name: Run quantization script
+        run: python quantize.py
