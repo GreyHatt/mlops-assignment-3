@@ -21,9 +21,9 @@ def load_model(model_path):
     return joblib.load(model_path)
 
 def extract_parameters(model):
-    coef = model.coef_
-    intercept = model.intercept_
-    return coef, intercept
+    weights = np.asarray(model.coef_)
+    bias = np.asarray(model.intercept_)
+    return weights, bias
 
 def quantize_parameters(params, min_val, max_val, bits=8):
     if max_val == min_val:
@@ -85,6 +85,66 @@ def run(model):
     print("Quantization error (bias):", np.mean(np.abs(bias - dequant_bias)))
     return model_torch
 
+
+def quantize_model(inp, n_bits=8):
+    levels = 2 ** n_bits -1
+    
+    val =  np.round(inp * levels).astype(np.uint8)
+    return val
+
+def dequantize_model(inp, n_bits=8):
+    levels = 2 ** n_bits -1
+    
+    val =  (inp.astype(np.float64) / levels)
+    return val
+
+def fix_run(model):
+    weights, bias = extract_parameters(model)
+    unquant_params = {
+        'weights': weights,
+        'bias': bias
+    }
+    joblib.dump(unquant_params, 'models/unquant_params.joblib')
+
+    w_min = weights.min()
+    w_max = weights.max()
+    b_min = bias.min()
+    b_max = bias.max()
+   
+    weights_norm = (weights - w_min) / (w_max - w_min) if w_max != w_min else np.zeros_like(weights)
+    bias_norm = (bias - b_min) / (b_max - b_min) if b_max != b_min else np.zeros_like(bias)
+
+    quantized_weights = quantize_model(weights_norm,8)
+    quantized_bias = quantize_model(bias_norm,8)
+   
+    weights_rec = dequantize_model(quantized_weights, 8) * (w_max - w_min) + w_min
+    bias_rec = dequantize_model(quantized_bias, 8) * (b_max - b_min) + b_min
+    bias_rec = bias_rec.item()
+
+    input_dim = weights.shape[0]
+    model_torch = SingleLayerPyTorch(input_dim)
+    with torch.no_grad():
+        model_torch.linear.weight.data = torch.from_numpy(weights_rec.reshape(1, -1).astype(np.float32))
+        model_torch.linear.bias.data = torch.tensor([bias_rec], dtype=torch.float32)
+
+
+    quant_params = {
+        'quant_weights': quantized_weights,
+        'quant_bias': quantized_bias,
+        'w_min': w_min,
+        'w_max': w_max,
+        'b_min': b_min,
+        'b_max': b_max,
+        "state_dict": model_torch.state_dict()
+    }
+    joblib.dump(quant_params, 'models/quant_params.joblib')
+   
+    print("Original weights shape:", weights.shape)
+    print("Quantization error (weights):", np.mean(np.abs(weights - weights_rec)))
+    print("Original bias shape:", bias.shape)
+    print("Quantization error (bias):", np.mean(np.abs(bias - bias_rec)))
+    return model_torch
+
 def final_metrics(sk_model, torch_model):
     data = fetch_california_housing()
     X, y = data.data, data.target
@@ -110,4 +170,6 @@ if __name__ == "__main__":
     model_path = Path("models/linear_regression.joblib")
     sk_model = load_model(model_path)
     torch_model = run(sk_model)
+    final_metrics(sk_model, torch_model)
+    torch_model = fix_run(sk_model)
     final_metrics(sk_model, torch_model)
